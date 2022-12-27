@@ -1,6 +1,6 @@
 from __future__ import annotations
 import qutip
-from qutip import operators
+from qutip import operators, entropy_vn
 from typing import List, Tuple, Optional, Type, Dict
 import numpy as np
 
@@ -27,6 +27,7 @@ class AbstractOperator:
             self.size - 1
         ), f"operator defined in a larger size system: idx > l={self.size}"
         self.__get_operator()
+        self.__abstract2qutip()
 
     def __get_operator(self):
         for i, idx in enumerate(self.index):
@@ -41,15 +42,14 @@ class AbstractOperator:
         self.index += ao.index
         self.coupling += ao.coupling
         self.__get_operator()
-
-        self.qutip_op, self.qutip_op_density = self.abstract2qutip()
+        self.__abstract2qutip()
 
         return self
 
     def printout(self):
         print(self.op)
 
-    def abstract2qutip(self) -> Tuple[qutip.Qobj, List[qutip.Qobj]]:
+    def __abstract2qutip(self) -> Tuple[qutip.Qobj, List[qutip.Qobj]]:
 
         # operation that convert the abstract string to the qutip.Qobj
         # pauli dictionary
@@ -113,11 +113,30 @@ class AbstractOperator:
 class IsingHamiltonian(AbstractOperator):
     def __init__(
         self,
-        j_coupling: Dict,
         direction_coupling: Tuple[str],
-        ext_field: Dict,
         field_direction: str,
+        pbc: Optional[bool] = False,
+        size: Optional[int] = None,
+        j: Optional[float] = None,
+        h: Optional[float] = None,
+        j_coupling: Optional[Dict] = None,
+        ext_field: Optional[Dict] = None,
     ) -> None:
+
+        # Fast Clean Transverse Ising Chain with nearest neighbourhoods
+        if j is not (None):
+            j_coupling = {}
+            for i in range(size):
+                if pbc:
+                    j_coupling[(i, (i + 1) % size)] = j
+                else:
+                    if i + 1 < size:
+                        j_coupling[(i, (i + 1))] = j
+
+        if h is not (None):
+            ext_field = {}
+            for i in range(size):
+                ext_field[(i,)] = h
 
         self.len_couplings = len(list(j_coupling.keys()))
         sum_coupling = j_coupling | ext_field
@@ -180,3 +199,12 @@ class SteadyStateSolver:
 
     def steady_state_expect_density(self, op: AbstractOperator) -> float:
         return op.exp_value_density()
+
+    def entanglement_entropy(self, size_a: int) -> float:
+
+        rho_b = self.steady_state.copy()
+        for i in range(size_a):
+            rho_b = rho_b.ptrace(0)
+        ent = entropy_vn(rho_b, base=2)
+
+        return ent
