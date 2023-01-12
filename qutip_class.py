@@ -203,8 +203,7 @@ class SteadyStateSolver:
     def entanglement_entropy(self, size_a: int) -> float:
 
         rho_b = self.steady_state.copy()
-        for i in range(size_a):
-            rho_b = rho_b.ptrace(0)
+        rho_b = rho_b.ptrace(np.arange(size_a))
         ent = entropy_vn(rho_b, base=2)
 
         return ent
