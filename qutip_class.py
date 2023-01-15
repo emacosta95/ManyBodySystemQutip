@@ -113,48 +113,106 @@ class AbstractOperator:
 class IsingHamiltonian(AbstractOperator):
     def __init__(
         self,
-        direction_coupling: Tuple[str],
-        field_direction: str,
+        direction_couplings: List[Tuple[str]],
+        field_directions: List[str],
         pbc: Optional[bool] = False,
         size: Optional[int] = None,
-        j: Optional[float] = None,
-        h: Optional[float] = None,
-        j_coupling: Optional[Dict] = None,
-        ext_field: Optional[Dict] = None,
+        js: Optional[List[float]] = None,
+        hs: Optional[List[float]] = None,
+        j_couplings: Optional[List[Dict]] = None,
+        ext_fields: Optional[List[Dict]] = None,
     ) -> None:
 
         # Fast Clean Transverse Ising Chain with nearest neighbourhoods
-        if j is not (None):
-            j_coupling = {}
-            for i in range(size):
-                if pbc:
-                    j_coupling[(i, (i + 1) % size)] = j
-                else:
-                    if i + 1 < size:
-                        j_coupling[(i, (i + 1))] = j
+        self.h_ao = []
+        if hs is not (None):
+            for m, h in enumerate(hs):
+                index = [(i,) for i in range(size)]
+                coupling = [h for i in range(size)]
+                dir = [field_directions[m] for i in range(size)]
+                self.h_ao.append(
+                    AbstractOperator(
+                        index=index, direction=dir, coupling=coupling, size=size
+                    )
+                )
+        else:
+            for m, h in enumerate(ext_fields):
+                coupling = list(h.values().item())
+                index=list(h.keys().item())
+                dir = [field_directions[m] for i in range(size)]
+                self.h_ao.append(
+                    AbstractOperator(
+                        index=index, direction=dir, coupling=coupling, size=size
+                    )
+                )
 
-        if h is not (None):
-            ext_field = {}
-            for i in range(size):
-                ext_field[(i,)] = h
+        # if js is a list of coupling constants
+        # initialize the coupling hamiltonian
+        self.j_ao = []
+        if js is not (None):
+            # initialize the coupling
+            # dictionary for the abstract
+            # operator
 
-        self.len_couplings = len(list(j_coupling.keys()))
-        sum_coupling = j_coupling | ext_field
-        index = list(sum_coupling.keys())
-        directions = [
-            [direction_coupling[0], direction_coupling[1]] for k in j_coupling.keys()
-        ] + [[field_direction] for k in ext_field.keys()]
-        size = len(ext_field)
-        interaction_values = list(sum_coupling.values())
+            # a loop over the different
+            # couplings (e.g.: j_1xx +j_2yy  )
+            if pbc:
+                index = [(i, (i + 1) % size) for i in range(size)]
+            else:
+                index = [(i, (i + 1)) for i in range(size - 1)]
+            for m, j in enumerate(js):
+                dir = [
+                    [direction_couplings[m][0], direction_couplings[m][1]]
+                    for s in index
+                ]
+                coupling = [j for s in index]
+                self.j_ao.append(
+                    AbstractOperator(
+                        index=index, direction=dir, coupling=coupling, size=size
+                    )
+                )
+        else:
+            for m, j in enumerate(j_couplings):
+                dir = [
+                    [direction_couplings[m][0], direction_couplings[m][1]]
+                    for i in j.keys()
+                ]
+                coupling = list(j.values().item())
+                self.j_ao.append(
+                    AbstractOperator(
+                        index=list(j.keys().item()),
+                        direction=dir,
+                        coupling=coupling,
+                        size=size,
+                    )
+                )
 
-        super().__init__(index, directions, interaction_values, len(ext_field))
+        self.qutip_op = 0
+        self.qutip_op_density = {}
+        for m, ham_j in enumerate(self.j_ao):
+            self.qutip_op = self.qutip_op + ham_j.qutip_op
+            self.qutip_op_density[direction_couplings[m]] = ham_j.qutip_op_density
+        for ham_h in self.h_ao:
+            self.qutip_op = self.qutip_op + ham_h.qutip_op
+            self.qutip_op_density[field_directions[m]] = ham_h.qutip_op_density
 
     def printout(self):
+        """Printout of the total Hamiltonian, with the description of the Coupling term and the External field"""
 
         print("Coupling Term: \n")
-        print(list(self.op.items())[: self.len_couplings], "\n")
+        for ham_j in self.j_ao:
+            ham_j.printout()
         print("External field: \n")
-        print(list(self.op.items())[self.len_couplings :], "\n")
+        for ham_h in self.h_ao:
+            ham_h.printout()
+
+    def expect_value_density(
+        self, psi: qutip.Qobj, key: Tuple[str]
+    ) -> Dict[qutip.QObj]:
+        values: dict = {}
+        for index in self.qutip_op_density.keys():
+            values[index] = qutip.expect(self.qutip_op_density[key][index], psi)
+        return values
 
 
 class SteadyStateSolver:
