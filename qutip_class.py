@@ -5,7 +5,25 @@ from typing import List, Tuple, Optional, Type, Dict
 import numpy as np
 
 
-class AbstractOperator:
+class ManyBodyQutipOperator:
+    def __init__(self, size: int, local_op: List[qutip.Qobj]) -> None:
+
+        self.qutip_op = None
+        self.__get_qutip_op(local_op)
+
+    def __get_qutip_op(self, local_op: List[qutip.Qobj]):
+
+        for i, op in enumerate(local_op):
+            if i == 0:
+                self.qutip_op = op
+            else:
+                self.qutip_op = qutip.tensor(self.qutip_op, op)
+
+    def expect_value(self, psi: qutip.Qobj) -> float:
+        return qutip.expect(self.qutip_op, psi)
+
+
+class AbstractOperator(ManyBodyQutipOperator):
     def __init__(
         self,
         index: List[Tuple],
@@ -35,16 +53,6 @@ class AbstractOperator:
                 "coupling": self.coupling[i],
                 "direction": self.direction[i],
             }
-
-    def append(self, ao: AbstractOperator) -> Optional[AbstractOperator]:
-        assert self.size == ao.size, "size!=operator size"
-        self.direction += ao.direction
-        self.index += ao.index
-        self.coupling += ao.coupling
-        self.__get_operator()
-        self.__abstract2qutip()
-
-        return self
 
     def printout(self):
         print(self.op)
@@ -126,7 +134,7 @@ class IsingHamiltonian(AbstractOperator):
         # size attribute
         self.size = size
         # Fast Clean Transverse Ising Chain with nearest neighbourhoods
-        self.h_ao = []
+        self.h_ao: List[AbstractOperator] = []
         if hs is not (None):
             for m, h in enumerate(hs):
                 index = [(i,) for i in range(self.size)]
@@ -150,7 +158,7 @@ class IsingHamiltonian(AbstractOperator):
 
         # if js is a list of coupling constants
         # initialize the coupling hamiltonian
-        self.j_ao = []
+        self.j_ao: List[AbstractOperator] = []
         if js is not (None):
             # initialize the coupling
             # dictionary for the abstract
@@ -240,9 +248,14 @@ class SteadyStateSolver:
             H=hamiltonian_qutip, c_ops=dissipative_qutip
         )
 
-    def get_steady_state(self) -> qutip.Qobj:
+    def get_steady_state(self, method: str) -> qutip.Qobj:
         self.__get_the_limbladian()
-        self.steady_state = qutip.steadystate(qutip.to_super(self.limbladian))
+        self.steady_state = qutip.steadystate(
+            qutip.to_super(self.limbladian),
+            method=method,
+            # use_rcm=True,
+            # diag_pivot_thresh=0.1,
+        )
 
     def print_liouvillian(self) -> None:
         print("Unitary part=\n")
@@ -270,4 +283,8 @@ class SteadyStateSolver:
         for idx in indices:
             mask[idx] = 1
         x = qutip.partial_transpose(x, mask=mask)
-        return (x.norm() - 1)/2
+        return (x.norm() - 1) / 2
+
+    def purity(self):
+        x = self.steady_state.copy()
+        return 1 - (x * x).norm()
