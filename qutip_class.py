@@ -123,26 +123,28 @@ class IsingHamiltonian(AbstractOperator):
         ext_fields: Optional[List[Dict]] = None,
     ) -> None:
 
+        # size attribute
+        self.size = size
         # Fast Clean Transverse Ising Chain with nearest neighbourhoods
         self.h_ao = []
         if hs is not (None):
             for m, h in enumerate(hs):
-                index = [(i,) for i in range(size)]
-                coupling = [h for i in range(size)]
-                dir = [field_directions[m] for i in range(size)]
+                index = [(i,) for i in range(self.size)]
+                coupling = [h for i in range(self.size)]
+                dir = [field_directions[m] for i in range(self.size)]
                 self.h_ao.append(
                     AbstractOperator(
-                        index=index, direction=dir, coupling=coupling, size=size
+                        index=index, direction=dir, coupling=coupling, size=self.size
                     )
                 )
         else:
             for m, h in enumerate(ext_fields):
                 coupling = list(h.values().item())
-                index=list(h.keys().item())
-                dir = [field_directions[m] for i in range(size)]
+                index = list(h.keys().item())
+                dir = [field_directions[m] for i in range(self.size)]
                 self.h_ao.append(
                     AbstractOperator(
-                        index=index, direction=dir, coupling=coupling, size=size
+                        index=index, direction=dir, coupling=coupling, size=self.size
                     )
                 )
 
@@ -157,9 +159,9 @@ class IsingHamiltonian(AbstractOperator):
             # a loop over the different
             # couplings (e.g.: j_1xx +j_2yy  )
             if pbc:
-                index = [(i, (i + 1) % size) for i in range(size)]
+                index = [(i, (i + 1) % size) for i in range(self.size)]
             else:
-                index = [(i, (i + 1)) for i in range(size - 1)]
+                index = [(i, (i + 1)) for i in range(self.size - 1)]
             for m, j in enumerate(js):
                 dir = [
                     [direction_couplings[m][0], direction_couplings[m][1]]
@@ -168,7 +170,7 @@ class IsingHamiltonian(AbstractOperator):
                 coupling = [j for s in index]
                 self.j_ao.append(
                     AbstractOperator(
-                        index=index, direction=dir, coupling=coupling, size=size
+                        index=index, direction=dir, coupling=coupling, size=self.size
                     )
                 )
         else:
@@ -183,7 +185,7 @@ class IsingHamiltonian(AbstractOperator):
                         index=list(j.keys().item()),
                         direction=dir,
                         coupling=coupling,
-                        size=size,
+                        size=self.size,
                     )
                 )
 
@@ -192,7 +194,7 @@ class IsingHamiltonian(AbstractOperator):
         for m, ham_j in enumerate(self.j_ao):
             self.qutip_op = self.qutip_op + ham_j.qutip_op
             self.qutip_op_density[direction_couplings[m]] = ham_j.qutip_op_density
-        for ham_h in self.h_ao:
+        for m, ham_h in enumerate(self.h_ao):
             self.qutip_op = self.qutip_op + ham_h.qutip_op
             self.qutip_op_density[field_directions[m]] = ham_h.qutip_op_density
 
@@ -251,17 +253,21 @@ class SteadyStateSolver:
             d.printout()
         print("\n")
 
-    def steady_state_expect(self, op: AbstractOperator) -> float:
-        # define the operator in
-        return op.exp_value(self.steady_state)
+    def negativity(self, indices: List[int]):
+        """Compute the negativity of a set of sites in the steady state. Code by Simon Kothe.
 
-    def steady_state_expect_density(self, op: AbstractOperator) -> float:
-        return op.exp_value_density()
+        Args:
+            indices (List[int]): list of spins in which the partial transposition acts.
+        """
 
-    def entanglement_entropy(self, size_a: int) -> float:
+        # make sure that the partial
+        # transpose does not affect
+        # the steadystate outcome
+        x = self.steady_state.copy()
 
-        rho_b = self.steady_state.copy()
-        rho_b = rho_b.ptrace(np.arange(size_a))
-        ent = entropy_vn(rho_b, base=2)
-
-        return ent
+        # define the mask
+        mask = np.zeros(self.size)
+        for idx in indices:
+            mask[idx] = 1
+        x = qutip.partial_transpose(x, mask=mask)
+        return (x.norm() - 1)/2
