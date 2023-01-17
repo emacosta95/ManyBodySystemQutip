@@ -6,10 +6,13 @@ import numpy as np
 
 
 class ManyBodyQutipOperator:
-    def __init__(self, size: int, local_op: List[qutip.Qobj]) -> None:
+    def __init__(
+        self, size: int, local_op: List[qutip.Qobj], description: Optional[str]
+    ) -> None:
 
         self.qutip_op = None
         self.__get_qutip_op(local_op)
+        self.description = description
 
     def __get_qutip_op(self, local_op: List[qutip.Qobj]):
 
@@ -22,8 +25,12 @@ class ManyBodyQutipOperator:
     def expect_value(self, psi: qutip.Qobj) -> float:
         return qutip.expect(self.qutip_op, psi)
 
+    def printout(self):
+        print(self.description, "\n")
+        print(self.qutip_op)
 
-class AbstractOperator(ManyBodyQutipOperator):
+
+class SpinOperator(ManyBodyQutipOperator):
     def __init__(
         self,
         index: List[Tuple],
@@ -62,7 +69,6 @@ class AbstractOperator(ManyBodyQutipOperator):
         # operation that convert the abstract string to the qutip.Qobj
         # pauli dictionary
         local_obs_dict = {
-            "id": qutip.identity(2),
             "x": qutip.sigmax(),
             "y": qutip.sigmay(),
             "z": qutip.sigmaz(),
@@ -82,34 +88,104 @@ class AbstractOperator(ManyBodyQutipOperator):
                 }
             )
 
-        qutip_op: qutip.Qobj = 0
-        qutip_op_density: Dict[qutip.Qobj] = {}
+        self.qutip_op_density: Dict[qutip.Qobj] = {}
         # create the op representation
-        for index in self.op.keys():
+        # considering each Tuple of
+        # indices and directions
+        for tuple_directions, tuple_indices, coupling in (
+            self.direction,
+            self.index,
+            self.coupling,
+        ):
+            # initialize the SpinOperator
+            op_list: List[qutip.Qobj] = [qutip.identity(2) for r in range(self.size)]
+            for idx, direction in (tuple_indices, tuple_directions):
+                op_list[idx] = local_obs_dict[direction]
             # starting point -> identity operator
-            idx_mb: List[str] = ["id" for i in range(self.size)]
-            for j, idx in enumerate(index):
-                idx_mb[idx] = self.op[index]["direction"][j]
-            # convert into qutip.Qobj
-            for i in range(self.size):
-                if i == 0:
-                    op = local_obs_dict[idx_mb[i]]
-                else:
-                    op = qutip.tensor(op, local_obs_dict[idx_mb[i]])
+            op = ManyBodyQutipOperator(size=self.size, local_op=op_list)
+
             # sum each direction
-            qutip_op = qutip_op + op * self.op[index]["coupling"]
-            qutip_op_density[index] = op * self.op[index]["coupling"]
+            self.qutip_op = self.qutip_op + op.qutip_op * coupling
+            self.qutip_op_density[tuple_indices] = op.qutip_op * coupling
 
-        # initialize the attributes in the class
-        # once for all
-        self.qutip_op = qutip_op
-        self.qutip_op_density = qutip_op_density
-        return qutip_op, qutip_op_density
+        return self.qutip_op.copy(), self.qutip_op_density.copy()
 
-    def expect_value(self, psi: qutip.Qobj) -> float:
-        return qutip.expect(self.qutip_op, psi)
+    def expect_value_density(self, psi: qutip.Qobj) -> Dict[qutip.Qobj]:
+        values: dict = {}
+        for index in self.qutip_op_density.keys():
+            values[index] = qutip.expect(self.qutip_op_density[index], psi)
+        return values
 
-    def expect_value_density(self, psi: qutip.Qobj) -> Dict[qutip.QObj]:
+
+class FockOperator(ManyBodyQutipOperator):
+    def __init__(
+        self,
+        index: List[Tuple],
+        direction: List[List],
+        coupling: List,
+        size: int,
+        exc_numb: Optional[int] = None,
+    ) -> None:
+
+        self.index = index
+        self.direction = direction
+        self.coupling = coupling
+        self.size = size
+        self.op: dict = {}
+        self.exc_numb = exc_numb
+
+        # if indices> size the operator is ill defined
+        assert max([max(idx) for idx in self.index]) <= (
+            self.size - 1
+        ), f"operator defined in a larger size system: idx > l={self.size}"
+        self.__get_operator()
+        self.__abstract2qutip()
+
+    def __get_operator(self):
+        for i, idx in enumerate(self.index):
+            self.op[idx] = {
+                "coupling": self.coupling[i],
+                "direction": self.direction[i],
+            }
+
+    def printout(self):
+        print(self.op)
+
+    def __abstract2qutip(self) -> Tuple[qutip.Qobj, List[qutip.Qobj]]:
+
+        # operation that convert the abstract string to the qutip.Qobj
+        # Fock dictionary
+        local_obs_dict = {
+            "id_fock": qutip.identity(self.exc_numb),
+            "a_dag": qutip.create(self.exc_numb),
+            "a": qutip.sigmay(self.exc_numb),
+        }
+
+        self.qutip_op_density: Dict[qutip.Qobj] = {}
+        # create the op representation
+        # considering each Tuple of
+        # indices and directions
+        for tuple_directions, tuple_indices, coupling in (
+            self.direction,
+            self.index,
+            self.coupling,
+        ):
+            # initialize the  manybody FockOperator
+            op_list: List[qutip.Qobj] = [
+                qutip.identity(self.exc_numb) for r in range(self.size)
+            ]
+            for idx, direction in (tuple_indices, tuple_directions):
+                op_list[idx] = local_obs_dict[direction]
+            # starting point -> identity operator
+            op = ManyBodyQutipOperator(size=self.size, local_op=op_list)
+
+            # sum each direction
+            self.qutip_op = self.qutip_op + op.qutip_op * coupling
+            self.qutip_op_density[tuple_indices] = op.qutip_op * coupling
+
+        return self.qutip_op.copy(), self.qutip_op_density.copy()
+
+    def expect_value_density(self, psi: qutip.Qobj) -> Dict[qutip.Qobj]:
         values: dict = {}
         for index in self.qutip_op_density.keys():
             values[index] = qutip.expect(self.qutip_op_density[index], psi)
@@ -118,7 +194,7 @@ class AbstractOperator(ManyBodyQutipOperator):
 
 # we still can implement new attributes
 # such as eigsh and gs_state
-class IsingHamiltonian(AbstractOperator):
+class IsingHamiltonian(SpinOperator):
     def __init__(
         self,
         direction_couplings: List[Tuple[str]],
@@ -127,38 +203,31 @@ class IsingHamiltonian(AbstractOperator):
         size: Optional[int] = None,
         js: Optional[List[float]] = None,
         hs: Optional[List[float]] = None,
-        j_couplings: Optional[List[Dict]] = None,
-        ext_fields: Optional[List[Dict]] = None,
+        j_couplings: Optional[List[ManyBodyQutipOperator]] = None,
+        ext_fields: Optional[List[ManyBodyQutipOperator]] = None,
     ) -> None:
 
         # size attribute
         self.size = size
         # Fast Clean Transverse Ising Chain with nearest neighbourhoods
-        self.h_ao: List[AbstractOperator] = []
+        self.h_ao: List[SpinOperator] = []
         if hs is not (None):
             for m, h in enumerate(hs):
                 index = [(i,) for i in range(self.size)]
                 coupling = [h for i in range(self.size)]
                 dir = [field_directions[m] for i in range(self.size)]
                 self.h_ao.append(
-                    AbstractOperator(
+                    SpinOperator(
                         index=index, direction=dir, coupling=coupling, size=self.size
                     )
                 )
         else:
             for m, h in enumerate(ext_fields):
-                coupling = list(h.values().item())
-                index = list(h.keys().item())
-                dir = [field_directions[m] for i in range(self.size)]
-                self.h_ao.append(
-                    AbstractOperator(
-                        index=index, direction=dir, coupling=coupling, size=self.size
-                    )
-                )
+                self.h_ao.append(h)
 
         # if js is a list of coupling constants
         # initialize the coupling hamiltonian
-        self.j_ao: List[AbstractOperator] = []
+        self.j_ao: List[SpinOperator] = []
         if js is not (None):
             # initialize the coupling
             # dictionary for the abstract
@@ -177,7 +246,7 @@ class IsingHamiltonian(AbstractOperator):
                 ]
                 coupling = [j for s in index]
                 self.j_ao.append(
-                    AbstractOperator(
+                    SpinOperator(
                         index=index, direction=dir, coupling=coupling, size=self.size
                     )
                 )
@@ -188,14 +257,7 @@ class IsingHamiltonian(AbstractOperator):
                     for i in j.keys()
                 ]
                 coupling = list(j.values().item())
-                self.j_ao.append(
-                    AbstractOperator(
-                        index=list(j.keys().item()),
-                        direction=dir,
-                        coupling=coupling,
-                        size=self.size,
-                    )
-                )
+                self.j_ao.append(j)
 
         self.qutip_op = 0
         self.qutip_op_density = {}
@@ -218,7 +280,7 @@ class IsingHamiltonian(AbstractOperator):
 
     def expect_value_density(
         self, psi: qutip.Qobj, key: Tuple[str]
-    ) -> Dict[qutip.QObj]:
+    ) -> Dict[qutip.Qobj]:
         values: dict = {}
         for index in self.qutip_op_density.keys():
             values[index] = qutip.expect(self.qutip_op_density[key][index], psi)
@@ -227,7 +289,9 @@ class IsingHamiltonian(AbstractOperator):
 
 class SteadyStateSolver:
     def __init__(
-        self, hamiltonian: AbstractOperator, dissipative_ops: List[AbstractOperator]
+        self,
+        hamiltonian: ManyBodyQutipOperator,
+        dissipative_ops: List[ManyBodyQutipOperator],
     ) -> None:
 
         # parameters
