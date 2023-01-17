@@ -250,12 +250,18 @@ class SteadyStateSolver:
 
     def get_steady_state(self, method: str) -> qutip.Qobj:
         self.__get_the_limbladian()
-        self.steady_state = qutip.steadystate(
-            qutip.to_super(self.limbladian),
-            method=method,
-            # use_rcm=True,
-            # diag_pivot_thresh=0.1,
-        )
+        try:
+            self.steady_state = qutip.steadystate(
+                qutip.to_super(self.limbladian),
+            )
+        except Exception:
+            print("Zero pivot, numerical factorization or iterative refinement problem")
+
+        else:
+            self.steady_state = qutip.steadystate(
+                qutip.to_super(self.limbladian),
+                method=method,
+            )
 
     def print_liouvillian(self) -> None:
         print("Unitary part=\n")
