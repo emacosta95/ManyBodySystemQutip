@@ -4,6 +4,12 @@ from qutip import operators, entropy_vn
 from typing import List, Tuple, Optional, Type, Dict
 import numpy as np
 
+# stackoverflow https://stackoverflow.com/questions/5389507/iterating-over-every-two-elements-in-a-list
+def pairwise(iterable):
+    "s -> (s0, s1), (s2, s3), (s4, s5), ..."
+    a = iter(iterable)
+    return zip(a, a)
+
 
 class ManyBodyQutipOperator:
     def __init__(
@@ -39,7 +45,6 @@ class SpinOperator(ManyBodyQutipOperator):
     def __init__(
         self,
         index: List[Tuple],
-        direction: List[List],
         coupling: List,
         size: int,
         exc_numb: Optional[int] = None,
@@ -49,7 +54,6 @@ class SpinOperator(ManyBodyQutipOperator):
 
         self.size = size
         self.index = index
-        self.direction = direction
         self.coupling = coupling
         self.exc_numb = exc_numb
 
@@ -65,7 +69,7 @@ class SpinOperator(ManyBodyQutipOperator):
         for i, idx in enumerate(self.index):
             op[idx] = {
                 "coupling": self.coupling[i],
-                "direction": self.direction[i],
+                "operator": idx,
             }
         self.description = op
 
@@ -87,14 +91,12 @@ class SpinOperator(ManyBodyQutipOperator):
         # indices and directions
         for k, tuple_indices in enumerate(self.index):
 
-            tuple_directions = self.direction[k]
             coupling = self.coupling[k]
             # initialize the SpinOperator
             op_list: List[qutip.Qobj] = [qutip.identity(2) for r in range(self.size)]
-            for j, idx in enumerate(tuple_indices):
+            for direction, idx in pairwise(tuple_indices):
                 # define the given
                 # local label operator
-                direction = tuple_directions[j]
                 op_list[idx] = local_obs_dict[direction]
             # starting point -> identity operator
             op = ManyBodyQutipOperator(size=self.size, local_op=op_list)
@@ -120,7 +122,6 @@ class FockOperator(ManyBodyQutipOperator):
     def __init__(
         self,
         index: List[Tuple],
-        direction: List[List],
         coupling: List,
         size: int,
         exc_numb: Optional[int] = None,
@@ -130,7 +131,6 @@ class FockOperator(ManyBodyQutipOperator):
 
         self.size = size
         self.index = index
-        self.direction = direction
         self.coupling = coupling
         self.op: dict = {}
         self.exc_numb = exc_numb
@@ -167,16 +167,14 @@ class FockOperator(ManyBodyQutipOperator):
         # indices and directions
         for k, tuple_indices in enumerate(self.index):
 
-            tuple_directions = self.direction[k]
             coupling = self.coupling[k]
             # initialize the FockOperator
             op_list: List[qutip.Qobj] = [
                 qutip.identity(self.exc_numb) for r in range(self.size)
             ]
-            for j, idx in enumerate(tuple_indices):
+            for direction, idx in pairwise(tuple_indices):
                 # define the given
                 # local label operator
-                direction = tuple_directions[j]
                 op_list[idx] = local_obs_dict[direction]
             # starting point -> identity operator
             op = ManyBodyQutipOperator(size=self.size, local_op=op_list)
@@ -198,9 +196,73 @@ class FockOperator(ManyBodyQutipOperator):
         return values
 
 
+class Hamiltonian(ManyBodyQutipOperator):
+    def __init__(
+        self,
+        size: int,
+        couplings: Optional[List[ManyBodyQutipOperator]] = None,
+        ext_fields: Optional[List[ManyBodyQutipOperator]] = None,
+        extra_terms: Optional[List[ManyBodyQutipOperator]] = None,
+    ) -> None:
+
+        super().__init__()
+        # size attribute
+        self.size = size
+        # Fast Clean Transverse Ising Chain with nearest neighbourhoods
+        self.h_ao: List[ManyBodyQutipOperator] = []
+        for m, h in enumerate(ext_fields):
+            self.h_ao.append(h)
+
+        # if js is a list of coupling constants
+        # initialize the coupling hamiltonian
+        self.j_ao: List[ManyBodyQutipOperator] = []
+        for m, j in enumerate(couplings):
+            self.j_ao.append(j)
+
+        self.others_ao: List[ManyBodyQutipOperator] = []
+        for m, j in enumerate(extra_terms):
+            self.others_ao.append(j)
+
+        self.qutip_op = 0
+        self.qutip_op_density = {}
+        for ham_j in self.j_ao:
+            self.qutip_op = self.qutip_op + ham_j.qutip_op
+            if ham_j.description is not (None):
+                self.qutip_op_density[ham_j.description] = ham_j.qutip_op_density
+        for ham_h in self.h_ao:
+            self.qutip_op = self.qutip_op + ham_h.qutip_op
+            if ham_h.description is not (None):
+                self.qutip_op_density[ham_h.description] = ham_h.qutip_op_density
+        for ham_o in self.others_ao:
+            self.qutip_op = self.qutip_op + ham_h.qutip_op
+            if ham_o.description is not (None):
+                self.qutip_op_density[ham_o.description] = ham_o.qutip_op_density
+
+    def printout(self):
+        """Printout of the total Hamiltonian, with the description of the Coupling term and the External field"""
+
+        print("Coupling Term: \n")
+        for ham_j in self.j_ao:
+            ham_j.printout()
+        print("External field: \n")
+        for ham_h in self.h_ao:
+            ham_h.printout()
+        print("External field: \n")
+        for ham_o in self.others_ao:
+            ham_o.printout()
+
+    def expect_value_density(
+        self, psi: qutip.Qobj, key: Tuple[str]
+    ) -> Dict[qutip.Qobj]:
+        values: dict = {}
+        for index in self.qutip_op_density.keys():
+            values[index] = qutip.expect(self.qutip_op_density[key][index], psi)
+        return values
+
+
 # we still can implement new attributes
 # such as eigsh and gs_state
-class IsingHamiltonian(SpinOperator):
+class IsingHamiltonian(Hamiltonian):
     def __init__(
         self,
         direction_couplings: List[Tuple[str]],
@@ -213,19 +275,16 @@ class IsingHamiltonian(SpinOperator):
         ext_fields: Optional[List[ManyBodyQutipOperator]] = None,
     ) -> None:
 
-        # size attribute
-        self.size = size
+        super().__init__(size=size)
+
         # Fast Clean Transverse Ising Chain with nearest neighbourhoods
-        self.h_ao: List[SpinOperator] = []
+        self.h_ao: List[ManyBodyQutipOperator] = []
         if hs is not (None):
             for m, h in enumerate(hs):
-                index = [(i,) for i in range(self.size)]
+                index = [(field_directions[m], i) for i in range(self.size)]
                 coupling = [h for i in range(self.size)]
-                dir = [field_directions[m] for i in range(self.size)]
                 self.h_ao.append(
-                    SpinOperator(
-                        index=index, direction=dir, coupling=coupling, size=self.size
-                    )
+                    SpinOperator(index=index, coupling=coupling, size=self.size)
                 )
         else:
             for m, h in enumerate(ext_fields):
@@ -233,7 +292,7 @@ class IsingHamiltonian(SpinOperator):
 
         # if js is a list of coupling constants
         # initialize the coupling hamiltonian
-        self.j_ao: List[SpinOperator] = []
+        self.j_ao: List[ManyBodyQutipOperator] = []
         if js is not (None):
             # initialize the coupling
             # dictionary for the abstract
@@ -241,38 +300,45 @@ class IsingHamiltonian(SpinOperator):
 
             # a loop over the different
             # couplings (e.g.: j_1xx +j_2yy  )
-            if pbc:
-                index = [(i, (i + 1) % size) for i in range(self.size)]
-            else:
-                index = [(i, (i + 1)) for i in range(self.size - 1)]
+
             for m, j in enumerate(js):
-                dir = [
-                    [direction_couplings[m][0], direction_couplings[m][1]]
-                    for s in index
-                ]
+                if pbc:
+                    index = [
+                        (
+                            direction_couplings[m][0],
+                            i,
+                            direction_couplings[m][1],
+                            (i + 1) % size,
+                        )
+                        for i in range(self.size)
+                    ]
+                else:
+                    index = [
+                        (
+                            direction_couplings[m][0],
+                            i,
+                            direction_couplings[m][1],
+                            (i + 1),
+                        )
+                        for i in range(self.size - 1)
+                    ]
+
                 coupling = [j for s in index]
                 self.j_ao.append(
-                    SpinOperator(
-                        index=index, direction=dir, coupling=coupling, size=self.size
-                    )
+                    SpinOperator(index=index, coupling=coupling, size=self.size)
                 )
         else:
             for m, j in enumerate(j_couplings):
-                dir = [
-                    [direction_couplings[m][0], direction_couplings[m][1]]
-                    for i in j.keys()
-                ]
-                coupling = list(j.values().item())
                 self.j_ao.append(j)
 
         self.qutip_op = 0
         self.qutip_op_density = {}
         for m, ham_j in enumerate(self.j_ao):
             self.qutip_op = self.qutip_op + ham_j.qutip_op
-            self.qutip_op_density[direction_couplings[m]] = ham_j.qutip_op_density
+            self.qutip_op_density[index[m]] = ham_j.qutip_op_density
         for m, ham_h in enumerate(self.h_ao):
             self.qutip_op = self.qutip_op + ham_h.qutip_op
-            self.qutip_op_density[field_directions[m]] = ham_h.qutip_op_density
+            self.qutip_op_density[index[m]] = ham_h.qutip_op_density
 
     def printout(self):
         """Printout of the total Hamiltonian, with the description of the Coupling term and the External field"""
