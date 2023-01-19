@@ -17,6 +17,12 @@ class ManyBodyQutipOperator:
         local_op: Optional[List[qutip.Qobj]] = None,
         description: Optional[str] = None,
     ) -> None:
+        """_summary_
+
+        Args:
+            local_op (Optional[List[qutip.Qobj]], optional): _description_. Defaults to None.
+            description (Optional[str], optional): _description_. Defaults to None.
+        """
 
         self.size = None
         self.qutip_op = None
@@ -47,7 +53,7 @@ class SpinOperator(ManyBodyQutipOperator):
         index: List[Tuple],
         coupling: List,
         size: int,
-        exc_numb: Optional[int] = None,
+        density: Optional[bool] = None,
     ) -> None:
 
         super().__init__()
@@ -55,14 +61,13 @@ class SpinOperator(ManyBodyQutipOperator):
         self.size = size
         self.index = index
         self.coupling = coupling
-        self.exc_numb = exc_numb
 
         # if indices> size the operator is ill defined
         assert max([max(idx) for idx in self.index]) <= (
             self.size - 1
         ), f"operator defined in a larger size system: idx > l={self.size}"
         self.__operator_description()
-        self.__abstract2qutip()
+        self.__abstract2qutip(density)
 
     def __operator_description(self):
         op: Dict = {}
@@ -73,7 +78,9 @@ class SpinOperator(ManyBodyQutipOperator):
             }
         self.description = op
 
-    def __abstract2qutip(self) -> Tuple[qutip.Qobj, List[qutip.Qobj]]:
+    def __abstract2qutip(
+        self, density: Optional[bool]
+    ) -> Tuple[qutip.Qobj, List[qutip.Qobj]]:
 
         # operation that convert the abstract string to the qutip.Qobj
         # pauli dictionary
@@ -107,7 +114,8 @@ class SpinOperator(ManyBodyQutipOperator):
             else:
                 self.qutip_op = self.qutip_op + op.qutip_op * coupling
 
-            self.qutip_op_density[tuple_indices] = op.qutip_op * coupling
+            if density:
+                self.qutip_op_density[tuple_indices] = op.qutip_op * coupling
 
         return self.qutip_op.copy(), self.qutip_op_density.copy()
 
@@ -125,6 +133,7 @@ class FockOperator(ManyBodyQutipOperator):
         coupling: List,
         size: int,
         exc_numb: Optional[int] = None,
+        density: Optional[bool] = None,
     ) -> None:
 
         super().__init__()
@@ -203,6 +212,7 @@ class Hamiltonian(ManyBodyQutipOperator):
         couplings: Optional[List[ManyBodyQutipOperator]] = None,
         ext_fields: Optional[List[ManyBodyQutipOperator]] = None,
         extra_terms: Optional[List[ManyBodyQutipOperator]] = None,
+        density: Optional[bool] = None,
     ) -> None:
 
         super().__init__()
@@ -223,19 +233,19 @@ class Hamiltonian(ManyBodyQutipOperator):
         for m, j in enumerate(extra_terms):
             self.others_ao.append(j)
 
-        self.qutip_op = 0
-        self.qutip_op_density = {}
+        self.qutip_op: qutip.Qobj = 0
+        self.qutip_op_density: Dict[qutip.Qobj] = {}
         for ham_j in self.j_ao:
             self.qutip_op = self.qutip_op + ham_j.qutip_op
-            if ham_j.description is not (None):
+            if ham_j.description is not (None) and density:
                 self.qutip_op_density[ham_j.description] = ham_j.qutip_op_density
         for ham_h in self.h_ao:
             self.qutip_op = self.qutip_op + ham_h.qutip_op
-            if ham_h.description is not (None):
+            if ham_h.description is not (None) and density:
                 self.qutip_op_density[ham_h.description] = ham_h.qutip_op_density
         for ham_o in self.others_ao:
             self.qutip_op = self.qutip_op + ham_h.qutip_op
-            if ham_o.description is not (None):
+            if ham_o.description is not (None) and density:
                 self.qutip_op_density[ham_o.description] = ham_o.qutip_op_density
 
     def printout(self):
@@ -262,7 +272,7 @@ class Hamiltonian(ManyBodyQutipOperator):
 
 # we still can implement new attributes
 # such as eigsh and gs_state
-class IsingHamiltonian(Hamiltonian):
+class SpinHamiltonian(Hamiltonian):
     def __init__(
         self,
         direction_couplings: List[Tuple[str]],
@@ -273,6 +283,7 @@ class IsingHamiltonian(Hamiltonian):
         hs: Optional[List[float]] = None,
         j_couplings: Optional[List[ManyBodyQutipOperator]] = None,
         ext_fields: Optional[List[ManyBodyQutipOperator]] = None,
+        density: Optional[bool] = None,
     ) -> None:
 
         super().__init__(size=size)
