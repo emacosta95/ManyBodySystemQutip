@@ -674,8 +674,8 @@ class Hamiltonian(ManyBodyQutipOperator):
 class SpinHamiltonian(Hamiltonian):
     def __init__(
         self,
-        direction_couplings: List[Tuple[str]],
-        field_directions: List[str],
+        direction_couplings: Optional[List[Tuple[str]]] = None,
+        field_directions: Optional[List[str]] = None,
         pbc: Optional[bool] = False,
         size: Optional[int] = None,
         coupling_values: Optional[List[float]] = None,
