@@ -123,7 +123,7 @@ class SpinOperatorOld(ManyBodyQutipOperatorOld):
 
 class ManyBodyQutipOperator:
     def __init__(
-        self,
+        self, local_op: Optional[List[qutip.Qobj]] = None, verbose: int = 0
     ) -> None:
         """_summary_
 
@@ -132,8 +132,10 @@ class ManyBodyQutipOperator:
             description (Optional[str], optional): _description_. Defaults to None.
         """
 
-        self._qutip_op = None
+        self.__get_qutip_op(local_op)
+
         self._description = None
+        self.verbose = verbose
 
     @property
     def qutip_op(self):
@@ -148,23 +150,43 @@ class ManyBodyQutipOperator:
         self._description = comment
 
     @qutip_op.setter
-    def qutip_op(self, local_op: List[qutip.Qobj]):
+    def qutip_op(self, mbop: qutip.Qobj):
+        self._qutip_op: qutip.Qobj = mbop
 
-        for i, op in enumerate(local_op):
-            if type(op) != qutip.qobj.Qobj:
-                raise TypeError(
-                    f"Element {i} is not a Qutip Object Qobj ({type(op)} instead)"
-                )
-            if i == 0:
-                self._qutip_op = op
-            else:
-                self._qutip_op = qutip.tensor(self.qutip_op, op)
+    @property
+    def verbose(self):
+        return self._verbose
+
+    @verbose.setter
+    def verbose(self, value: int):
+        if not (value in [0, 1]):
+            raise ValueError(
+                "verbose should be either 0 (just string description) or 1 (matrix printout) \n"
+            )
+        self._verbose = value
+
+    def __get_qutip_op(self, local_op: List[qutip.Qobj]):
+
+        if local_op is not (None):
+            for i, op in enumerate(local_op):
+                if type(op) != qutip.qobj.Qobj:
+                    raise TypeError(
+                        f"Element {i} is not a Qutip Object Qobj ({type(op)} instead)"
+                    )
+                if i == 0:
+                    mbop = op
+                else:
+                    mbop = qutip.tensor(mbop, op)
+                self.qutip_op = mbop
 
     def expect_value(self, psi: qutip.Qobj) -> float:
         return qutip.expect(self.qutip_op, psi)
 
     def __str__(self) -> str:
-        return f"{self.description} \n {self.qutip_op} \n"
+        if self.verbose == 0:
+            return f"{self.description} \n"
+        else:
+            return f"{self.description} \n {self.qutip_op} \n"
 
 
 class SpinOperator(ManyBodyQutipOperator):
@@ -173,6 +195,7 @@ class SpinOperator(ManyBodyQutipOperator):
         index: List[Tuple],
         coupling: List,
         size: int,
+        verbose: int = 0,
     ) -> None:
 
         super().__init__()
@@ -198,6 +221,8 @@ class SpinOperator(ManyBodyQutipOperator):
         # in this subclass
         self.__get_qutip_op()
 
+        self.verbose = verbose
+
     @property
     def index(self):
         return self._index
@@ -208,10 +233,12 @@ class SpinOperator(ManyBodyQutipOperator):
             for direction, idx in pairwise(tuple_indices):
                 # check the direction
                 if not (direction in self._local_obs_dict.keys()):
-                    raise f"local operator string not defined -> {direction} index -> {idx}"
+                    raise ValueError(
+                        f"local operator string not defined -> {direction} index -> {idx}"
+                    )
 
                 if idx > self.size - 1:
-                    raise f"error, index larger than the number of sites"
+                    raise ValueError(f"error, index larger than the number of sites")
 
         self._index = index
 
@@ -225,7 +252,23 @@ class SpinOperator(ManyBodyQutipOperator):
 
     @property
     def qutip_op(self):
-        return super().qutip_op
+        return self._qutip_op
+
+    @qutip_op.setter
+    def qutip_op(self, mbop: qutip.Qobj):
+
+        if mbop.data.shape != (2 ** self.size, 2 ** self.size):
+            raise ValueError(
+                f"size mismatch -> l={self.size} effective l={mbop.data.shape}"
+            )
+        if mbop.dims != (
+            [[2 for i in range(self.size)], [2 for i in range(self.size)]]
+        ):
+            raise ValueError(
+                f"dimension mismatch -> not a qubit representation ({mbop.dims})"
+            )
+
+        self._qutip_op = mbop
 
     def __get_qutip_op(
         self,
@@ -255,15 +298,15 @@ class SpinOperator(ManyBodyQutipOperator):
 
                 # we fix the first part of the chain with
                 # an identity operator
-                if not (0 in op_dict.keys()):
-                    indices.append(0)
-                    op_dict[0] = self._local_obs_dict["id"]
+            if not (0 in op_dict.keys()):
+                indices.append(0)
+                op_dict[0] = self._local_obs_dict["id"]
 
                 # and the last part with another identity
                 # operator
-                if not (self.size - 1 in op_dict.keys()):
-                    indices.append(self.size - 1)
-                    op_dict[self.size - 1] = self._local_obs_dict["id"]
+            if not (self.size - 1 in op_dict.keys()):
+                indices.append(self.size - 1)
+                op_dict[self.size - 1] = self._local_obs_dict["id"]
 
             # order the indices
             indices.sort()
@@ -281,6 +324,8 @@ class SpinOperator(ManyBodyQutipOperator):
                 # otherwise define the operator
                 else:
                     chain_oper = op_dict[idx]
+                # if k == 1:
+                #     print("partial chain oper=", chain_oper, k)
 
                 if i == 0:
                     many_body_op = chain_oper
@@ -288,18 +333,19 @@ class SpinOperator(ManyBodyQutipOperator):
                     many_body_op = qutip.tensor(many_body_op, chain_oper)
 
                 jdx = idx
-                # if k == 1:
-                #     print("partial many body op=", many_body_op)
 
-            # if k == 1:
-            #     print("mboperator=", many_body_op)
+            # reshape the dimension of the qutip
+            # object
+            many_body_op = qutip.Qobj(
+                many_body_op.data,
+                dims=[[2 for i in range(self.size)], [2 for i in range(self.size)]],
+            )
 
             # sum each direction
             if k == 0:
-                self._qutip_op = many_body_op * coupling
+                self.qutip_op = many_body_op * coupling
             else:
-
-                self._qutip_op = self._qutip_op + many_body_op * coupling
+                self.qutip_op = self.qutip_op + many_body_op * coupling
 
 
 class FockOperatorOld(ManyBodyQutipOperator):
@@ -430,7 +476,7 @@ class FockOperator(ManyBodyQutipOperator):
 
     @property
     def qutip_op(self):
-        return super().qutip_op
+        return self._qutip_op
 
     def __get_qutip_op(
         self,
@@ -501,10 +547,10 @@ class FockOperator(ManyBodyQutipOperator):
 
             # sum each direction
             if k == 0:
-                self._qutip_op = many_body_op * coupling
+                self.qutip_op = many_body_op * coupling
             else:
 
-                self._qutip_op = self._qutip_op + many_body_op * coupling
+                self.qutip_op = self.qutip_op + many_body_op * coupling
 
 
 class Hamiltonian(ManyBodyQutipOperator):
@@ -528,7 +574,7 @@ class Hamiltonian(ManyBodyQutipOperator):
         # other terms
         self.others_ao: List[ManyBodyQutipOperator] = extra_terms
 
-        self.__get_qutip_op()
+        self.get_qutip_op()
 
     @property
     def h_ao(self):
@@ -540,7 +586,9 @@ class Hamiltonian(ManyBodyQutipOperator):
         if ext_fields != None:
             for m, h in enumerate(ext_fields):
 
-                if type(h) != ManyBodyQutipOperator:
+                if not (
+                    isinstance(h, ManyBodyQutipOperator) or isinstance(h, SpinOperator)
+                ):
                     raise TypeError(
                         f"element {m} of the external field list is not a qutip.Qobj ({type(h)})"
                     )
@@ -557,7 +605,9 @@ class Hamiltonian(ManyBodyQutipOperator):
         if couplings != None:
             for m, j in enumerate(couplings):
 
-                if type(j) != ManyBodyQutipOperator:
+                if not (
+                    isinstance(j, ManyBodyQutipOperator) or isinstance(j, SpinOperator)
+                ):
                     raise TypeError(
                         f"element {m} of the coupling terms list is not a qutip.Qobj ({type(j)})"
                     )
@@ -574,7 +624,9 @@ class Hamiltonian(ManyBodyQutipOperator):
         if other_terms != None:
             for m, o in enumerate(other_terms):
 
-                if type(o) != ManyBodyQutipOperator:
+                if not (
+                    isinstance(o, ManyBodyQutipOperator) or isinstance(o, SpinOperator)
+                ):
                     raise TypeError(
                         f"element {m} of the coupling terms list is not a qutip.Qobj ({type(o)})"
                     )
@@ -583,33 +635,38 @@ class Hamiltonian(ManyBodyQutipOperator):
 
     def __str__(self) -> str:
 
-        description = "Coupling Term: \n"
+        description = "Coupling Terms: \n"
         for ham_j in self.j_ao:
             description = description + f"{ham_j}"
-        description = description + "External field: \n"
+        description = description + "External fields: \n"
         for ham_h in self.h_ao:
             description = description + f"{ham_h}"
-        description = description + "External field: \n"
+        description = description + "Other terms: \n"
         for ham_o in self.others_ao:
             description = description + f"{ham_o}"
         description = description + "\n"
 
         return description
 
-    def __get_qutip_op(self):
+    def get_qutip_op(self):
 
-        for ham_j in self.j_ao:
-            self.qutip_op = self.qutip_op + ham_j.qutip_op
-        for ham_h in self.h_ao:
-            self.qutip_op = self.qutip_op + ham_h.qutip_op
-        for ham_o in self.others_ao:
-            self.qutip_op = self.qutip_op + ham_h.qutip_op
+        if (
+            self.j_ao is not (None)
+            or self.h_ao is not (None)
+            or self.ham_o is not (None)
+        ):
+            self.qutip_op: qutip.Qobj = 0.0
+            for ham_j in self.j_ao:
+                self.qutip_op = self.qutip_op + ham_j.qutip_op
+            for ham_h in self.h_ao:
+                self.qutip_op = self.qutip_op + ham_h.qutip_op
+            for ham_o in self.others_ao:
+                self.qutip_op = self.qutip_op + ham_h.qutip_op
 
-        if self.qutip_op != None:
-            if self.qutip_op.check_herm():
-                print("Hermitian Check positive! well done! \n")
-            else:
-                raise ValueError("Non Hermitian Hamiltonian \n")
+                if self.qutip_op.check_herm():
+                    print("Hermitian Check positive! well done! \n")
+                else:
+                    raise ValueError("Non Hermitian Hamiltonian \n")
 
 
 # we still can implement new attributes
@@ -643,7 +700,7 @@ class SpinHamiltonian(Hamiltonian):
             j_couplings=j_couplings,
         )
 
-        self.__get_qutip_op()
+        self.get_qutip_op()
 
     def __get_external_field(
         self,
@@ -655,12 +712,8 @@ class SpinHamiltonian(Hamiltonian):
         h_ao: List[ManyBodyQutipOperator] = []
         if field_values is not (None):
             for m, h in enumerate(field_values):
-                print(h)
                 index = [(field_directions[m], i) for i in range(self.size)]
                 coupling = [h for i in range(self.size)]
-                print(index)
-                print(self.size)
-                print(coupling)
                 h_ao.append(
                     SpinOperator(index=index, coupling=coupling, size=self.size)
                 )
@@ -716,14 +769,6 @@ class SpinHamiltonian(Hamiltonian):
         elif j_couplings is not (None):
             for m, j in enumerate(j_couplings):
                 self.j_ao.append(j)
-
-    def expect_value_density(
-        self, psi: qutip.Qobj, key: Tuple[str]
-    ) -> Dict[qutip.Qobj]:
-        values: dict = {}
-        for index in self.qutip_op_density.keys():
-            values[index] = qutip.expect(self.qutip_op_density[key][index], psi)
-        return values
 
 
 class SteadyStateSolver:
