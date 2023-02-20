@@ -11,119 +11,12 @@ def pairwise(iterable):
     return zip(a, a)
 
 
-class ManyBodyQutipOperatorOld:
-    def __init__(
-        self,
-        local_op: Optional[List[qutip.Qobj]] = None,
-        description: Optional[str] = None,
-    ) -> None:
-        """_summary_
-        Args:
-            local_op (Optional[List[qutip.Qobj]], optional): _description_. Defaults to None.
-            description (Optional[str], optional): _description_. Defaults to None.
-        """
-
-        self.size = None
-        self.qutip_op = None
-        if local_op is not (None):
-            self.__get_qutip_op(local_op)
-            self.size = len(local_op)
-        self.description = description
-
-    def __get_qutip_op(self, local_op: List[qutip.Qobj]):
-
-        for i, op in enumerate(local_op):
-            if i == 0:
-                self.qutip_op = op
-            else:
-                self.qutip_op = qutip.tensor(self.qutip_op, op)
-
-    def expect_value(self, psi: qutip.Qobj) -> float:
-        return qutip.expect(self.qutip_op, psi)
-
-    def printout(self):
-        print(self.description, "\n")
-        print(self.qutip_op, "\n")
-
-
-class SpinOperatorOld(ManyBodyQutipOperatorOld):
-    def __init__(
-        self,
-        index: List[Tuple],
-        coupling: List,
-        size: int,
-        density: Optional[bool] = None,
-    ) -> None:
-
-        super().__init__()
-
-        self.size = size
-        self.index = index
-        self.coupling = coupling
-
-        self.__operator_description()
-        self.__abstract2qutip(density)
-
-    def __operator_description(self):
-        op: Dict = {}
-        for i, idx in enumerate(self.index):
-            op[idx] = {
-                "coupling": self.coupling[i],
-                "operator": idx,
-            }
-        self.description = op
-
-    def __abstract2qutip(
-        self, density: Optional[bool]
-    ) -> Tuple[qutip.Qobj, List[qutip.Qobj]]:
-
-        # operation that convert the abstract string to the qutip.Qobj
-        # pauli dictionary
-        local_obs_dict = {
-            "x": qutip.sigmax(),
-            "y": qutip.sigmay(),
-            "z": qutip.sigmaz(),
-            "+": qutip.sigmap(),
-            "-": qutip.sigmam(),
-        }
-
-        self.qutip_op_density: Dict[qutip.Qobj] = {}
-        # create the op representation
-        # considering each Tuple of
-        # indices and directions
-        for k, tuple_indices in enumerate(self.index):
-
-            coupling = self.coupling[k]
-            # initialize the SpinOperator
-            op_list: List[qutip.Qobj] = [qutip.identity(2) for r in range(self.size)]
-            for direction, idx in pairwise(tuple_indices):
-                # define the given
-                # local label operator
-                op_list[idx] = local_obs_dict[direction]
-            # starting point -> identity operator
-            op = ManyBodyQutipOperatorOld(local_op=op_list)
-
-            # sum each direction
-            if k == 0:
-                self.qutip_op = op.qutip_op * coupling
-            else:
-                self.qutip_op = self.qutip_op + op.qutip_op * coupling
-
-            if density:
-                self.qutip_op_density[tuple_indices] = op.qutip_op * coupling
-
-        return self.qutip_op.copy(), self.qutip_op_density.copy()
-
-    def expect_value_density(self, psi: qutip.Qobj) -> Dict[qutip.Qobj]:
-        values: dict = {}
-        for index in self.qutip_op_density.keys():
-            values[index] = qutip.expect(self.qutip_op_density[index], psi)
-        return values
-
-
 class ManyBodyQutipOperator:
     def __init__(
-        self, local_op: Optional[List[qutip.Qobj]] = None, verbose: int = 0
+        self,
+        local_op: Optional[List[Tuple(qutip.Qobj)]] = None,
+        description: Optional[str] = None,
+        verbose: int = 0,
     ) -> None:
         """_summary_
 
@@ -134,7 +27,7 @@ class ManyBodyQutipOperator:
 
         self.__get_qutip_op(local_op)
 
-        self._description = None
+        self.description = description
         self.verbose = verbose
 
     @property
@@ -165,19 +58,23 @@ class ManyBodyQutipOperator:
             )
         self._verbose = value
 
-    def __get_qutip_op(self, local_op: List[qutip.Qobj]):
+    def __get_qutip_op(self, local_op: List[List[qutip.Qobj]]):
 
         if local_op is not (None):
-            for i, op in enumerate(local_op):
-                if type(op) != qutip.qobj.Qobj:
-                    raise TypeError(
-                        f"Element {i} is not a Qutip Object Qobj ({type(op)} instead)"
-                    )
+            for i, ops in enumerate(local_op):
+                for j, op in enumerate(ops):
+                    if type(op) != qutip.qobj.Qobj:
+                        raise TypeError(
+                            f"Element {i} is not a Qutip Object Qobj ({type(op)} instead)"
+                        )
+                    if j == 0:
+                        mbop = op
+                    else:
+                        mbop = qutip.tensor(mbop, op)
                 if i == 0:
-                    mbop = op
+                    self.qutip_op = mbop
                 else:
-                    mbop = qutip.tensor(mbop, op)
-                self.qutip_op = mbop
+                    self.qutip_op = self.qutip_op + mbop
 
     def expect_value(self, psi: qutip.Qobj) -> float:
         return qutip.expect(self.qutip_op, psi)
@@ -348,81 +245,6 @@ class SpinOperator(ManyBodyQutipOperator):
                 self.qutip_op = self.qutip_op + many_body_op * coupling
 
 
-class FockOperatorOld(ManyBodyQutipOperator):
-    def __init__(
-        self,
-        index: List[Tuple],
-        coupling: List,
-        size: int,
-        exc_numb: Optional[int] = None,
-        density: Optional[bool] = None,
-    ) -> None:
-
-        super().__init__()
-
-        self.size = size
-        self.index = index
-        self.coupling = coupling
-        self.op: dict = {}
-        self.exc_numb = exc_numb
-
-        self.__operator_description()
-        self.__abstract2qutip()
-
-    def __operator_description(self):
-        op: Dict = {}
-        for i, idx in enumerate(self.index):
-            op[idx] = {
-                "coupling": self.coupling[i],
-                "direction": self.direction[i],
-            }
-        self.description = op
-
-    def __abstract2qutip(self) -> Tuple[qutip.Qobj, List[qutip.Qobj]]:
-
-        # operation that convert the abstract string to the qutip.Qobj
-        # Fock dictionary
-        local_obs_dict = {
-            "id_fock": qutip.identity(self.exc_numb),
-            "a_dag": qutip.create(self.exc_numb),
-            "a": qutip.sigmay(self.exc_numb),
-        }
-
-        self.qutip_op_density: Dict[qutip.Qobj] = {}
-        # create the op representation
-        # considering each Tuple of
-        # indices and directions
-        for k, tuple_indices in enumerate(self.index):
-
-            coupling = self.coupling[k]
-            # initialize the FockOperator
-            op_list: List[qutip.Qobj] = [
-                qutip.identity(self.exc_numb) for r in range(self.size)
-            ]
-            for direction, idx in pairwise(tuple_indices):
-                # define the given
-                # local label operator
-                op_list[idx] = local_obs_dict[direction]
-            # starting point -> identity operator
-            op = ManyBodyQutipOperator(size=self.size, local_op=op_list)
-
-            # sum each direction
-            if k == 0:
-                self.qutip_op = op.qutip_op * coupling
-            else:
-                self.qutip_op = self.qutip_op + op.qutip_op * coupling
-
-            self.qutip_op_density[tuple_indices] = op.qutip_op * coupling
-
-        return self.qutip_op.copy(), self.qutip_op_density.copy()
-
-    def expect_value_density(self, psi: qutip.Qobj) -> Dict[qutip.Qobj]:
-        values: dict = {}
-        for index in self.qutip_op_density.keys():
-            values[index] = qutip.expect(self.qutip_op_density[index], psi)
-        return values
-
-
 class FockOperator(ManyBodyQutipOperator):
     def __init__(
         self,
@@ -434,9 +256,11 @@ class FockOperator(ManyBodyQutipOperator):
 
         super().__init__()
 
+        self.exc_numb = exc_numb
+
         # operation that convert the abstract string to the qutip.Qobj
         # Fock dictionary
-        self.local_obs_dict = {
+        self._local_obs_dict = {
             "id_fock": qutip.identity(self.exc_numb),
             "a_dag": qutip.create(self.exc_numb),
             "a": qutip.destroy(self.exc_numb),
@@ -445,7 +269,6 @@ class FockOperator(ManyBodyQutipOperator):
         self.size = size
         self.index = index
         self.coupling = coupling
-        self.exc_numb = exc_numb
 
         self.__get_qutip_op()
 
@@ -459,10 +282,14 @@ class FockOperator(ManyBodyQutipOperator):
             for direction, idx in pairwise(tuple_indices):
                 # check the direction
                 if not (direction in self._local_obs_dict.keys()):
-                    raise f"local operator string not defined -> {direction} index -> {idx}"
+                    raise ValueError(
+                        f"local operator string not defined -> {direction} index -> {idx}"
+                    )
 
                 if idx > self.size - 1:
-                    raise f"error, index larger than the number of sites"
+                    raise ValueError(
+                        f"error, index larger than the number of sites (idx={idx} sites={self.size})"
+                    )
 
         self._index = index
 
@@ -477,6 +304,25 @@ class FockOperator(ManyBodyQutipOperator):
     @property
     def qutip_op(self):
         return self._qutip_op
+
+    @qutip_op.setter
+    def qutip_op(self, mbop: qutip.Qobj):
+
+        if mbop.data.shape != (self.exc_numb ** self.size, self.exc_numb ** self.size):
+            raise ValueError(
+                f"size mismatch -> l={self.size} effective l={mbop.data.shape}"
+            )
+        if mbop.dims != (
+            [
+                [self.exc_numb for i in range(self.size)],
+                [self.exc_numb for i in range(self.size)],
+            ]
+        ):
+            raise ValueError(
+                f"dimension mismatch -> not a qubit representation ({mbop.dims})"
+            )
+
+        self._qutip_op = mbop
 
     def __get_qutip_op(
         self,
@@ -506,15 +352,15 @@ class FockOperator(ManyBodyQutipOperator):
 
                 # we fix the first part of the chain with
                 # an identity operator
-                if not (0 in op_dict.keys()):
-                    indices.append(0)
-                    op_dict[0] = self._local_obs_dict["id_fock"]
+            if not (0 in op_dict.keys()):
+                indices.append(0)
+                op_dict[0] = self._local_obs_dict["id_fock"]
 
                 # and the last part with another identity
                 # operator
-                if not (self.size - 1 in op_dict.keys()):
-                    indices.append(self.size - 1)
-                    op_dict[self.size - 1] = self._local_obs_dict["id_fock"]
+            if not (self.size - 1 in op_dict.keys()):
+                indices.append(self.size - 1)
+                op_dict[self.size - 1] = self._local_obs_dict["id_fock"]
 
             # order the indices
             indices.sort()
@@ -532,6 +378,8 @@ class FockOperator(ManyBodyQutipOperator):
                 # otherwise define the operator
                 else:
                     chain_oper = op_dict[idx]
+                # if k == 1:
+                #     print("partial chain oper=", chain_oper, k)
 
                 if i == 0:
                     many_body_op = chain_oper
@@ -539,17 +387,18 @@ class FockOperator(ManyBodyQutipOperator):
                     many_body_op = qutip.tensor(many_body_op, chain_oper)
 
                 jdx = idx
-                # if k == 1:
-                #     print("partial many body op=", many_body_op)
 
-            # if k == 1:
-            #     print("mboperator=", many_body_op)
+            # reshape the dimension of the qutip
+            # object
+            many_body_op = qutip.Qobj(
+                many_body_op.data,
+                dims=[[2 for i in range(self.size)], [2 for i in range(self.size)]],
+            )
 
             # sum each direction
             if k == 0:
                 self.qutip_op = many_body_op * coupling
             else:
-
                 self.qutip_op = self.qutip_op + many_body_op * coupling
 
 
