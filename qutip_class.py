@@ -409,6 +409,7 @@ class Hamiltonian(ManyBodyQutipOperator):
         couplings: Optional[List[ManyBodyQutipOperator]] = None,
         ext_fields: Optional[List[ManyBodyQutipOperator]] = None,
         extra_terms: Optional[List[ManyBodyQutipOperator]] = None,
+        verbose: int = 0,
     ) -> None:
 
         super().__init__()
@@ -424,6 +425,8 @@ class Hamiltonian(ManyBodyQutipOperator):
         self.others_ao: List[ManyBodyQutipOperator] = extra_terms
 
         self.get_qutip_op()
+
+        self.verbose = verbose
 
     @property
     def h_ao(self):
@@ -531,11 +534,14 @@ class SpinHamiltonian(Hamiltonian):
         field_values: Optional[List[float]] = None,
         j_couplings: Optional[List[ManyBodyQutipOperator]] = None,
         ext_fields: Optional[List[ManyBodyQutipOperator]] = None,
+        verbose: int = 0,
     ) -> None:
 
         super().__init__(size=size)
 
         # Fast Clean Transverse Ising Chain with nearest neighbourhoods
+
+        self.verbose = verbose
 
         self.__get_external_field(
             field_directions=field_directions,
