@@ -105,6 +105,8 @@ class SpinOperator(ManyBodyQutipOperator):
             "+": qutip.sigmap(),
             "-": qutip.sigmam(),
             "id": qutip.identity(2),
+            "qz": (qutip.qeye(2)-qutip.sigmaz())/2,  # projector on |1
+            "qx": (qutip.qeye(2)-qutip.sigmax())/2,  # projector on |+>
         }
 
         # size of the system
