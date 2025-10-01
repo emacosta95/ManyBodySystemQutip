@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ManyBodyQutip"
+version = "0.1.0"
+description = "A library that wraps QuTiP to simulate many-body quantum systems"
+authors = [
+    { name = "Emanuele Costa" }
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "qutip"
+]
+
+[tool.setuptools]
+packages = ["ManyBodyQutip"]
